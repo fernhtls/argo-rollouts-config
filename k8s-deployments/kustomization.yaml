@@ -1,0 +1,8 @@
+namespace: app-argo-rollouts
+namePrefix: dev-
+nameSuffix: "-001"
+images:
+  - name: app-argp-rollouts
+    newTag: v1.0.0
+resources:
+- app-argo-rollouts.yaml

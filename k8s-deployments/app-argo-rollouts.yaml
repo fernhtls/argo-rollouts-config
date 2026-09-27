@@ -1,0 +1,36 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-argo-rollouts
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: argo-rollouts-deployment
+  name: argo-rollouts-deployment
+  namespace: app-argo-rollouts
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: argo-rollouts-deployment
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: argo-rollouts-deployment
+    spec:
+      containers:
+      - image: app-argp-rollouts:v1.0.0
+        name: app-argp-rollouts
+        resources:
+          requests:
+            cpu: "0.1"
+            memory: "500M"
+          limits:
+            cpu: "0.4"
+            memory: "1G" 
+---
+
