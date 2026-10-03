@@ -1,0 +1,4 @@
+server:
+  host: ""
+  port: "5001"
+version: "v1.0.0"
