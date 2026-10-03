@@ -12,7 +12,7 @@ metadata:
   name: argo-rollouts-deployment
   namespace: app-argo-rollouts
 spec:
-  replicas: 3
+  replicas: 3 
   selector:
     matchLabels:
       app: argo-rollouts-deployment
@@ -22,10 +22,11 @@ spec:
         app: argo-rollouts-deployment
     spec:
       containers:
-      - image: app-argp-rollouts:v1.0.0
-        name: app-argp-rollouts
+      - image: app-argo-rollouts
+        name: app-argo-rollouts
         ports:
-          - containerPort: 5000 
+          - name: http
+            containerPort: 5001
         resources:
           requests:
             cpu: "0.1"
@@ -33,10 +34,36 @@ spec:
           limits:
             cpu: "0.4"
             memory: "1G" 
-  strategy:
-    canary:
-      steps:
-        - setWeight: 10 
-        - pause: {}
+  strategy: {}
 ---
-
+apiVersion: v1
+kind: Service
+metadata:
+  name: argo-rollouts-deployment-http
+  labels:
+    app: argo-rollouts-deployment-http
+spec:
+  selector:
+    app: argo-rollouts-deployment
+  ports:
+    - name: http 
+      port: 5001
+      targetPort: http 
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: argo-rollouts-deployment-metrics
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "5001"
+    prometheus.io/path: "/metrics"
+  labels:
+    app: argo-rollouts-deployment-metrics
+spec:
+  selector:
+    app: argo-rollouts-deployment
+  ports:
+    - name: metrics
+      port: 5001
+      targetPort: http 

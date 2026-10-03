@@ -1,0 +1,13 @@
+namespace: app-argo-rollouts
+namePrefix: canary-
+images:
+  - name: app-argo-rollouts
+    newName: localhost/app-argo-rollouts
+    newTag: v2.0.0
+resources:
+- ../../app-argo-rollouts.yaml
+patches:
+  - path: strategy-patch.yaml
+    target:
+      kind: Rollout
+      name: argo-rollouts-deployment

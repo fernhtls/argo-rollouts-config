@@ -65,7 +65,7 @@ podman build . -t app-argo-rollouts:v1.0.0
 I am using a remote podman and minikube cluser on another machine, so I am able to push the build there as well, so it's within the same environment as the minikube I'm using:
 
 ```bash
-podman build --connection fsouza1 build . -t app-argo-rollouts:v1.0.0
+podman --connection fsouza1 build . -t app-argo-rollouts:v1.0.0
 ```
 
 For the second version we will be randomly waiting on returning a response.
@@ -79,9 +79,41 @@ Now build a second version of the image for our new deployment:
 ```bash
 podman build . -t app-argo-rollout:v2.0.0
 ```
+There are several ways to make the image available to your `minikube` instance (on podman running as another container and it can't reach the registry), but on my simple setup I would rather just share the image by `saving` a tar file and then `loading` into minikube:
 
+```bash
+podman save localhost/app-argo-rollouts:v1.0.0 -o app-rollouts-v100.tar
+```
+
+```bash
+minikube load app-rollouts-v100.tar
+```
+
+I'll have to do it a second time for the new version as well.
+
+We could be enabling the registry addong on minikube, but I would rather keep it isolated and `load` images when needed only.
 
 # Installation
+
+## oha Loadtests
+
+I'll be using either [`oha`](https://rustutils.com/tools/oha/) or [`hey`](https://cli.wiki/hey---HTTP-Load-Testing-Tool-Guide#overview) as my loadtest tool.
+
+`oha` is `rust` and it gives you a execution summary and histograms, and it looks a bit nicer in terms of output and live tracking the executions.
+
+For go enjoyers there's `hey`, and it can be installed and embedded with any go application.
+
+`hey` brings a summary and histogram of execution as well, but with a simple interface.
+
+I'm seeing `hey` as an alternative, but mainly I'll be using `oha`, as the installation, help is ready to use on macs, but might try `hey` on the server machine I'm deploying everything as well.
+
+`oha` installation:
+
+```bash
+brew install oha
+```
+
+For more info on both tools check the links above.
 
 ## Prometheus deployment to minikube
 
@@ -129,18 +161,28 @@ And here's the main page on prometheus, where you can test and check the queries
 
 ![Prometheus query panel](./pictures/prometheus-query.png)
 
+We can install the `CRDs` now, as the previous `helm` installation was mainly for the `prometheus` stack.
+
+```bash
+helm install prometheus-operator-crds prometheus-community/prometheus-operator-crds
+```
+
 ## Argo-Rollouts installation
 
 In order to install the controllers for `Argo-Rollouts`:
 
 ```bash
 kubectl create namespace argo-rollouts
-kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+kubectl apply --server-side --force-conflicts -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
 ```
+
+**PS: It includes already the `CRDs`/**
 
 ## Rollout / Deployment creation
 
-I'll be using `kustomize` and `kubeconform` to install and lint the resources.
+I'll be using `kustomize` and `kubeconform` to apply and lint the resources.
+
+**Work with both will make it easier as well to template the same resources by just passing different `overlays` for both scenarios.**
 
 The requirements for this step is to have at least the [`Argo-Rollouts` installation done first](#argo-rollouts-installation) as this depends on the `Rollout` CRD installation.
 
@@ -156,23 +198,37 @@ Checking the kustomize output with `kubeconform`:
 
 ```bash
 cd k8s-deployments/
-kustomize build . | kubeconform \
+kustomize build --load-restrictor LoadRestrictionsNone ./overlays/canary | kubeconform \
   -schema-location default \
-  -schema-location 'https://raw.githubusercontent.com/CustomResourceDefinition/catalog/main/schema/argoproj.io/rollout_v1alpha1.json' \
+  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
   -strict -summary
 ```
 
 ```bash
-Summary: 2 resources found parsing stdin - Valid: 2, Invalid: 0, Errors: 0, Skipped: 0
+Summary: 5 resources found parsing stdin - Valid: 5, Invalid: 0, Errors: 0, Skipped: 0
 ```
 
 Appllying changes with kustomize (change the image tag: 
 
 ```bash
 cd k8s-deployments/ 
-kustomize edit set image <registry/image:tag>
-kubectl apply -k .
+kustomize edit --load-restrictor LoadRestrictionsNone ./overlays/canary set image <registry/image:tag>
+kustomize build --load-restrictor LoadRestrictionsNone overlays/canary | kubectl apply -f -
 ```
+
+```bash
+namespace/app-argo-rollouts created
+service/canary-argo-rollouts-deployment-http created
+service/canary-argo-rollouts-deployment-metrics created
+rollout.argoproj.io/canary-argo-rollouts-deployment created
+```
+
+If you want to clean all resources there the same `kustomize build` can be used with delete now:
+
+```bash
+kustomize build --load-restrictor LoadRestrictionsNone overlays/canary | kubectl delete -f -
+```
+
 # Blue-Green
 
 # Canary
