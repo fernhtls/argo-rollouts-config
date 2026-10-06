@@ -3,7 +3,7 @@ namePrefix: canary-
 images:
   - name: app-argo-rollouts
     newName: localhost/app-argo-rollouts
-    newTag: v2.0.0
+    newTag: v1.0.0
 resources:
 - ../../app-argo-rollouts.yaml
 patches:

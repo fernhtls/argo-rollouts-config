@@ -3,11 +3,13 @@ package main
 import (
 	_ "embed"
 	"fmt"
+	"os"
 
 	"encoding/json"
 	"log"
 	mrand "math/rand"
 	"net/http"
+
 	// "time"
 
 	"gopkg.in/yaml.v3"
@@ -56,7 +58,7 @@ var (
 			Name: "app_http_requests_total",
 			Help: "Total number of HTTP requests processed",
 		},
-		[]string{"method", "endpoint", "version"},
+		[]string{"method", "endpoint", "rollouts_pod_template_hash"},
 	)
 
 	requestDuration = prometheus.NewHistogramVec(
@@ -65,7 +67,7 @@ var (
 			Help:    "Request duration in seconds",
 			Buckets: prometheus.DefBuckets,
 		},
-		[]string{"method", "endpoint", "version"},
+		[]string{"method", "endpoint", "rollouts_pod_template_hash"},
 	)
 )
 
@@ -74,13 +76,17 @@ func instrumentHandler(endpoint string, serverVersion string, handler http.Handl
 	return func(w http.ResponseWriter, r *http.Request) {
 		timer := prometheus.NewTimer(requestDuration.WithLabelValues(r.Method, endpoint, serverVersion))
 		defer timer.ObserveDuration()
-		requestCounter.WithLabelValues(r.Method, endpoint, serverVersion).Inc()
+		requestCounter.WithLabelValues(r.Method, endpoint, os.Getenv("POD_TEMPLATE_HASH")).Inc()
 		handler(w, r)
 	}
 }
 
 // predict : handler function to our predict
 func predict(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "invalid method", http.StatusMethodNotAllowed)
+		return
+	}
 	var pr PredictRequest
 	if err := json.NewDecoder(req.Body).Decode(&pr); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)

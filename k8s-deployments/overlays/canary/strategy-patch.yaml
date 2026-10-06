@@ -5,8 +5,28 @@ metadata:
 spec:
   strategy:
     canary:
+      analysis:
+        templates:
+        - templateName: canary-latency 
+        startingStep: 2 # delay starting analysis run until setWeight: 40%
+        args:
+        - name: app-name
+          value: argo-rollouts-deployment-metrics
+        - name: predict-endpoint
+          value: predict
+        - name: latest-version 
+        - name: canary-hash
+          valueFrom:
+            podTemplateHashValue: Latest
+        - name: stable-hash
+          valueFrom:
+            podTemplateHashValue: Stable
       steps:
-        - setWeight: 10 
+        - setWeight: 20 
         - pause: {duration: 5m}
-        - setWeight: 50
+        - setWeight: 40
+        - pause: {duration: 5m}
+        - setWeight: 60 
+        - pause: {duration: 5m}
+        - setWeight: 80 
         - pause: {duration: 5m}

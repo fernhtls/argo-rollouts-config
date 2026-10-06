@@ -2,7 +2,6 @@
 
 `Argo-Rollouts` is a controller from `ArgoCD` that provides ways to performa analysis on deployments, and progress or rollback those based on metrics and statistics.
 
-
 The problems `Argo-Rollouts` solves:
 
 * Progressive deployment of a single version for your deployments, but only after some proof / analysis that the new version satisfies the criteria.
@@ -115,6 +114,19 @@ brew install oha
 
 For more info on both tools check the links above.
 
+Example request:
+
+```bash
+oha http://localhost:5001/predict \
+  -m POST \
+  -H "Content-Type: application/json" \
+  -Z ./oha-loadtest/requests.ndjson \
+  -q 10 \
+  -z 5m \
+  -c 10 \
+  --no-tui
+```
+
 ## Prometheus deployment to minikube
 
 I'll use the community maintained helm chart for prometheus for this installation.
@@ -226,9 +238,51 @@ rollout.argoproj.io/canary-argo-rollouts-deployment created
 If you want to clean all resources there the same `kustomize build` can be used with delete now:
 
 ```bash
+cd k8s-deployments/
 kustomize build --load-restrictor LoadRestrictionsNone overlays/canary | kubectl delete -f -
 ```
 
 # Blue-Green
 
 # Canary
+
+Your logic holds only if traffic stays constant. A decrease in le="0.5" can just mean fewer requests overall, so the absolute bucket rate isn't a reliable signal. What matters is the proportion of requests under a threshold. If le="0.5" drops while le="+Inf" doesn't, there are more executions above 0.5s.
+
+So compare the fraction of fast requests, now vs before:
+
+```promql
+(
+  sum(rate(app_request_duration_seconds_bucket{le="0.5"}[5m]))
+  / sum(rate(app_request_duration_seconds_bucket{le="+Inf"}[5m]))
+)
+-
+(
+  sum(rate(app_request_duration_seconds_bucket{le="0.5"}[5m] offset 1h))
+  / sum(rate(app_request_duration_seconds_bucket{le="+Inf"}[5m] offset 1h))
+)
+```
+
+A negative result means a smaller share of requests are finishing under 0.5s than before, which is a latency regression. Pick the le that matches your SLO or the latency you care about for that endpoint.
+
+Quantiles work too, and they're easier to read as "p95 went from X to Y":
+
+```promql
+histogram_quantile(0.95, sum by (le) (rate(app_request_duration_seconds_bucket[5m])))
+/
+histogram_quantile(0.95, sum by (le) (rate(app_request_duration_seconds_bucket[5m] offset 1h)))
+```
+
+A value above 1 means p95 got slower. Add handler (or whatever your endpoint label is) to the by clause to get this per endpoint.
+
+For deployments specifically:
+
+Don't use offset 5m. During a rolling update, the previous 5 minutes already contain a mix of old and new pods, so the comparison is muddied. Use an offset that lands before the rollout started, or the same time yesterday (offset 1d) if your traffic has daily patterns.
+The best option is comparing versions side by side. If your metrics carry a version label (or you can join with kube_pod_labels), compare old vs new pods at the same moment, so traffic patterns affect both equally:
+
+```promql
+histogram_quantile(0.95, sum by (le, version) (rate(app_request_duration_seconds_bucket[5m])))
+```
+
+This works well with canary deployments.
+
+Make sure the threshold matches an actual bucket boundary. If you query le="0.5" and your buckets are 0.3 and 1, you get no data. Quantiles are also only as precise as your bucket layout, since Prometheus interpolates linearly within a bucket.
