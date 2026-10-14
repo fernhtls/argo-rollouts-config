@@ -10,7 +10,7 @@ import (
 	mrand "math/rand"
 	"net/http"
 
-	// "time"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -29,7 +29,7 @@ type ServerCofing struct {
 		Host string `yaml:"host"`
 		Port string `yaml:"port"`
 	} `yaml:"server"`
-	Version string `yaml:"version"`
+	Hash string `yaml:"hash,omitempty"`
 }
 
 // Metadata : metadata used for our request and response
@@ -48,7 +48,6 @@ type PredictRequest struct {
 type PredictResponse struct {
 	Metadata      Metadata  `json:"metadata"`
 	Results       []float64 `json:"results"`
-	ServerVersion string    `json:"server_version"`
 }
 
 // vars for our metrics / counter and duration
@@ -72,11 +71,11 @@ var (
 )
 
 // instrumentHandler : implements the metric instrumentation for a handler
-func instrumentHandler(endpoint string, serverVersion string, handler http.HandlerFunc) http.HandlerFunc {
+func instrumentHandler(endpoint string, rolloutHash string, handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		timer := prometheus.NewTimer(requestDuration.WithLabelValues(r.Method, endpoint, serverVersion))
+		timer := prometheus.NewTimer(requestDuration.WithLabelValues(r.Method, endpoint, rolloutHash))
 		defer timer.ObserveDuration()
-		requestCounter.WithLabelValues(r.Method, endpoint, os.Getenv("POD_TEMPLATE_HASH")).Inc()
+		requestCounter.WithLabelValues(r.Method, endpoint, rolloutHash).Inc()
 		handler(w, r)
 	}
 }
@@ -100,20 +99,22 @@ func predict(w http.ResponseWriter, req *http.Request) {
 		results[i] = v * float64(mrand.Intn(5))
 	}
 	// TODO: v2 will be adding the sleep here for requests to take longer
-	// time.Sleep(time.Second*time.Duration(mrand.Intn(2)))
+	time.Sleep(time.Second*time.Duration(mrand.Intn(2)))
 	prs := PredictResponse{
 		Metadata:      pr.Metadata,
 		Results:       results,
-		ServerVersion: serverConfig.Version,
 	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(prs)
 }
 
+var rolloutHash string
+
 func init() {
 	if err := yaml.Unmarshal(serverConfigBytes, &serverConfig); err != nil {
 		log.Fatalf("error on parsing config: %v", err)
 	}
+	rolloutHash = os.Getenv("POD_TEMPLATE_HASH")
 }
 
 func main() {
@@ -125,9 +126,9 @@ func main() {
 		requestDuration,
 	)
 	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	http.Handle("/predict", instrumentHandler("predict", serverConfig.Version, predict))
+	http.Handle("/predict", instrumentHandler("predict", rolloutHash, predict))
 	server := fmt.Sprintf("%s:%s", serverConfig.Server.Host, serverConfig.Server.Port)
-	log.Printf("starting server %s with version %s ...\n", server, serverConfig.Version)
+	log.Printf("starting server %s with hash %s ...\n", server, rolloutHash)
 	if err := http.ListenAndServe(server, nil); err != nil {
 		log.Fatalf("Server error: %s", err)
 	}

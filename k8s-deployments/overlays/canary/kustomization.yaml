@@ -11,3 +11,7 @@ patches:
     target:
       kind: Rollout
       name: argo-rollouts-deployment
+  - path: cronjob-patch.yaml
+    target:
+      kind: CronJob
+      name: oha-loadtest

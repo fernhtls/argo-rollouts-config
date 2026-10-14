@@ -27,6 +27,7 @@ graph TB
         direction LR
             app-v1
             app-v2
+            app-svc
         end
         subgraph argorollouts["Argo-Rollouts"]
         direction LR 
@@ -34,10 +35,16 @@ graph TB
            analysis["Analysis config"]
            controller <--> analysis
         end
+        subgraph loadtester["oha-loadtester"]
+            cronjob
+        end
     end
     app-v1 ---> prometheus
     app-v2 ---> prometheus
     app-v1 .- |new version| app-v2
+    app-svc .- |endpoints| app-v1
+    app-svc .- |endpoints| app-v2
+    cronjob ---> |load / calls predict| app-svc
     controller <---> |reads metrics| prometheus
     controller -.-> |ok: progress| app-v2
     controller -.-> |not ok: keep| app-v1
@@ -81,11 +88,11 @@ podman build . -t app-argo-rollout:v2.0.0
 There are several ways to make the image available to your `minikube` instance (on podman running as another container and it can't reach the registry), but on my simple setup I would rather just share the image by `saving` a tar file and then `loading` into minikube:
 
 ```bash
-podman save localhost/app-argo-rollouts:v1.0.0 -o app-rollouts-v100.tar
+podman save localhost/app-argo-rollouts:v1.0.0 -o app-argo-rollouts-v100.tar
 ```
 
 ```bash
-minikube load app-rollouts-v100.tar
+minikube image load app-argo-rollouts-v100.tar
 ```
 
 I'll have to do it a second time for the new version as well.
@@ -179,6 +186,8 @@ We can install the `CRDs` now, as the previous `helm` installation was mainly fo
 helm install prometheus-operator-crds prometheus-community/prometheus-operator-crds
 ```
 
+**Ps: We won't be using any but just showing just in case you want to change this setup by using some of the prometheus `CRDs`.**
+
 ## Argo-Rollouts installation
 
 In order to install the controllers for `Argo-Rollouts`:
@@ -246,7 +255,7 @@ kustomize build --load-restrictor LoadRestrictionsNone overlays/canary | kubectl
 
 # Canary
 
-Your logic holds only if traffic stays constant. A decrease in le="0.5" can just mean fewer requests overall, so the absolute bucket rate isn't a reliable signal. What matters is the proportion of requests under a threshold. If le="0.5" drops while le="+Inf" doesn't, there are more executions above 0.5s.
+A decrease in le="0.5" can just mean fewer requests overall, so the absolute bucket rate isn't a reliable signal. What matters is the proportion of requests under a threshold. If le="0.5" drops while le="+Inf" doesn't, there are more executions above 0.5s.
 
 So compare the fraction of fast requests, now vs before:
 
@@ -273,16 +282,3 @@ histogram_quantile(0.95, sum by (le) (rate(app_request_duration_seconds_bucket[5
 ```
 
 A value above 1 means p95 got slower. Add handler (or whatever your endpoint label is) to the by clause to get this per endpoint.
-
-For deployments specifically:
-
-Don't use offset 5m. During a rolling update, the previous 5 minutes already contain a mix of old and new pods, so the comparison is muddied. Use an offset that lands before the rollout started, or the same time yesterday (offset 1d) if your traffic has daily patterns.
-The best option is comparing versions side by side. If your metrics carry a version label (or you can join with kube_pod_labels), compare old vs new pods at the same moment, so traffic patterns affect both equally:
-
-```promql
-histogram_quantile(0.95, sum by (le, version) (rate(app_request_duration_seconds_bucket[5m])))
-```
-
-This works well with canary deployments.
-
-Make sure the threshold matches an actual bucket boundary. If you query le="0.5" and your buckets are 0.3 and 1, you get no data. Quantiles are also only as precise as your bucket layout, since Prometheus interpolates linearly within a bucket.

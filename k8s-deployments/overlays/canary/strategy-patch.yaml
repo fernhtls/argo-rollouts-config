@@ -11,7 +11,7 @@ spec:
         startingStep: 2 # delay starting analysis run until setWeight: 40%
         args:
         - name: app-name
-          value: argo-rollouts-deployment-metrics
+          value: argo-rollouts-deployment
         - name: predict-endpoint
           value: predict
         - name: latest-version 
