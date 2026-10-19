@@ -4,13 +4,16 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"strconv"
 
 	"encoding/json"
 	"log"
-	mrand "math/rand"
+	// TODO: v2.0.1 - comment as no mrand for generating the response
+	// "math/rand"
 	"net/http"
 
-	"time"
+	// TODO: v2.0.0 - uncomment for sleep
+	// "time"
 
 	"gopkg.in/yaml.v3"
 
@@ -46,8 +49,8 @@ type PredictRequest struct {
 
 // PredictResponse : struct for the reponse
 type PredictResponse struct {
-	Metadata      Metadata  `json:"metadata"`
-	Results       []float64 `json:"results"`
+	Metadata Metadata  `json:"metadata"`
+	Results  []float64 `json:"results"`
 }
 
 // vars for our metrics / counter and duration
@@ -57,9 +60,8 @@ var (
 			Name: "app_http_requests_total",
 			Help: "Total number of HTTP requests processed",
 		},
-		[]string{"method", "endpoint", "rollouts_pod_template_hash"},
+		[]string{"method", "endpoint", "status_code", "rollouts_pod_template_hash"},
 	)
-
 	requestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "app_request_duration_seconds",
@@ -70,12 +72,26 @@ var (
 	)
 )
 
+// statusRecorder Wraps the status code from the predict calls
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+// WriteHeader Writes the header data into the status recorder
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
 // instrumentHandler : implements the metric instrumentation for a handler
 func instrumentHandler(endpoint string, rolloutHash string, handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		timer := prometheus.NewTimer(requestDuration.WithLabelValues(r.Method, endpoint, rolloutHash))
 		defer timer.ObserveDuration()
-		requestCounter.WithLabelValues(r.Method, endpoint, rolloutHash).Inc()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK} // default if WriteHeader is never called
+		handler(rec, r)
+		requestCounter.WithLabelValues(r.Method, endpoint, strconv.Itoa(rec.status), rolloutHash).Inc()
 		handler(w, r)
 	}
 }
@@ -96,13 +112,15 @@ func predict(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-type", "application/json")
 	results := make([]float64, len(pr.Inputs))
 	for i, v := range pr.Inputs {
-		results[i] = v * float64(mrand.Intn(5))
+		// results[i] = v * float64(rand.Intn(5))
+		// TODO: v2.0.1 - Ucomment to set our version v2.0.1
+		results[i] = v * float64(2)
 	}
-	// TODO: v2 will be adding the sleep here for requests to take longer
-	time.Sleep(time.Second*time.Duration(mrand.Intn(2)))
+	// TODO: v2.0.0 - adding the sleep here for requests to take longer
+	// time.Sleep(time.Second*time.Duration(rand.Intn(2)))
 	prs := PredictResponse{
-		Metadata:      pr.Metadata,
-		Results:       results,
+		Metadata: pr.Metadata,
+		Results:  results,
 	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(prs)

@@ -7,26 +7,23 @@ spec:
     canary:
       analysis:
         templates:
-        - templateName: canary-latency 
-        startingStep: 2 # delay starting analysis run until setWeight: 40%
+        - templateName: canary-latency
+        - templateName: canary-errors-new-rollout
+        startingStep: 2 # delay starting analysis run until setWeight: 50%
         args:
         - name: app-name
           value: argo-rollouts-deployment
         - name: predict-endpoint
           value: predict
-        - name: latest-version 
         - name: canary-hash
           valueFrom:
             podTemplateHashValue: Latest
-        - name: stable-hash
-          valueFrom:
-            podTemplateHashValue: Stable
       steps:
         - setWeight: 20 
         - pause: {duration: 5m}
-        - setWeight: 40
+        - setWeight: 50 
+        - pause: {duration: 8m}
+        - setWeight: 70 
         - pause: {duration: 5m}
-        - setWeight: 60 
-        - pause: {duration: 5m}
-        - setWeight: 80 
+        - setWeight: 90 
         - pause: {duration: 5m}

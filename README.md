@@ -32,7 +32,7 @@ graph TB
         subgraph argorollouts["Argo-Rollouts"]
         direction LR 
            controller["Controller"] 
-           analysis["Analysis config"]
+           analysis["AnalysisTemplate"]
            controller <--> analysis
         end
         subgraph loadtester["oha-loadtester"]
@@ -60,7 +60,7 @@ Components:
     * `App v2`: second version of the `Rollout`.
 * `Prometheus`: metric provider for our `argo-rollout`. 
 
-## Building the image
+## Building the images
 
 First version of the app:
 
@@ -68,36 +68,65 @@ First version of the app:
 podman build . -t app-argo-rollouts:v1.0.0
 ```
 
-I am using a remote podman and minikube cluser on another machine, so I am able to push the build there as well, so it's within the same environment as the minikube I'm using:
+I am using a remote podman and minikube host, so I am able to push the build to the remote host:
 
 ```bash
-podman --connection fsouza1 build . -t app-argo-rollouts:v1.0.0
+podman --connection <remote-host> build . -t app-argo-rollouts:v1.0.0
 ```
 
-For the second version we will be randomly waiting on returning a response.
+For the version `v2.0.0` we will be randomly wait / pause for a few seconds on requests:
 
-Ucomment [line 7](./app/main.go#7), it's the import for the `time` go package.
-
-And uncomment [line 78](./app/main.go#78), to add the `time.Sleep` call.
+1. Ucomment [line 16](./app/main.go#16), it's the import for the `time` go package.
+2. And uncomment [line 120](./app/main.go#120), to add the `time.Sleep` call.
 
 Now build a second version of the image for our new deployment:
 
 ```bash
 podman build . -t app-argo-rollout:v2.0.0
 ```
+
+For version `v2.0.1`, our fix to the version above we will remove the wait, and plus remove the calculation we have on generating the response, just using a constant instead.
+
+This is mainly to just get a bit more time on returning the responses and to garaantee we will be on the same `SLO` or bettter than the previous deployment.
+
 There are several ways to make the image available to your `minikube` instance (on podman running as another container and it can't reach the registry), but on my simple setup I would rather just share the image by `saving` a tar file and then `loading` into minikube:
+
+1. Comment both lines for the `v2.0.0` above, again [line 16](./app/main.go#15) and [line 120](./app/main.go#120).
+2. Now comment the `mrand` we call for generating the reponse at [line 12](./app/main.go#12) and [line 115](./app/main.go#115), and uncomment [line 117](./app/main.go#117).
+
+Again build the new image:
+
+```bash
+podman build . -t app-argo-rollout:v2.0.0
+```
 
 ```bash
 podman save localhost/app-argo-rollouts:v1.0.0 -o app-argo-rollouts-v100.tar
+```
+
+If you want to save multiple images use the `--multi-image-archive` or `-m` option, otherwise the other names in the list will be load as only tags for the image being saved:
+
+```bash
+podman save -m localhost/app-argo-rollouts:v1.0.0 localhost/app-argo-rollouts:v2.0.0 localhost/app-argo-rollouts:v2.0.1 -o app-argo-rollouts.tar
+Copying blob f4aefcbfe669 done   |
+Copying blob f24db9c6334e done   |
+Copying config 43718e2f44 done   |
+Writing manifest to image destination
+Copying blob f4aefcbfe669 skipped: already exists
+Copying blob e3999601d03b done   |
+Copying config 3b675aeb01 done   |
+Writing manifest to image destination
+Copying blob f4aefcbfe669 skipped: already exists
+Copying blob d745a710d55d done   |
+Copying config a0c911041d done   |
+Writing manifest to image destination
 ```
 
 ```bash
 minikube image load app-argo-rollouts-v100.tar
 ```
 
-I'll have to do it a second time for the new version as well.
-
-We could be enabling the registry addong on minikube, but I would rather keep it isolated and `load` images when needed only.
+**With the 3 images now at hand we can now proceed with the rollouts, as mainly the rollouts will be pushing new hashes due to the image change.**
 
 # Installation
 
@@ -133,6 +162,14 @@ oha http://localhost:5001/predict \
   -c 10 \
   --no-tui
 ```
+
+`oha` will be deployed as a `CronJob` in order to trigger requests to the setup.
+
+**If we `port-forward` the k8s service and push requests to it, it pushes requests to a single pod, as it's mainly just like a helper to get to pick an endpoint or pod, so use it to validate your app, but not as a load-test, as requests won't be distributed to different pods.**
+
+**Ps: Services are only doing round-robin calls to the underline pods / endpoints, so there's no rule by default that looks if a pod is overloaded or not.**
+
+Check the [`README`](./oha-loadtest/README.md) for more details on the image, and build it using the same techniques as showed above for the app images, and make it available / load to your `minikube` / `k8s` cluster.
 
 ## Prometheus deployment to minikube
 
@@ -179,14 +216,6 @@ kubectl --namespace prometheus port-forward $POD_NAME 9090
 And here's the main page on prometheus, where you can test and check the queries we will be using for our `argo-rollouts` scenarios:
 
 ![Prometheus query panel](./pictures/prometheus-query.png)
-
-We can install the `CRDs` now, as the previous `helm` installation was mainly for the `prometheus` stack.
-
-```bash
-helm install prometheus-operator-crds prometheus-community/prometheus-operator-crds
-```
-
-**Ps: We won't be using any but just showing just in case you want to change this setup by using some of the prometheus `CRDs`.**
 
 ## Argo-Rollouts installation
 
@@ -248,37 +277,107 @@ If you want to clean all resources there the same `kustomize build` can be used 
 
 ```bash
 cd k8s-deployments/
-kustomize build --load-restrictor LoadRestrictionsNone overlays/canary | kubectl delete -f -
+kustomize build --load-restrictor LoadRestrictionsNone overlays/canary | kubectl delete --force=true -f -
 ```
 
-# Blue-Green
+# Kustomize setup
+
+I'm build the following as the structure for managing the deployments with `kustomize`:
+
+```text
+k8s-deployments/
+   ├─ overlays/                         - all patches / overwrites done by kustomize to the app-argo-rollouts.yaml
+   │  └─ canary/                        - canary patches / overwrites
+   │     ├─ cronjob-patch.yaml          - CronJob patch with the query and other aspects of the k8s CronJob
+   │     ├─ kustomization.yaml          - main canary kustomization.yaml pointing to the patch files and main file
+   │     └─ strategy-patch.yaml         - the canary strategy patch for the rollout
+   └─ app-argo-rollouts.yaml            - main yaml with all resource definitions
+```
+
+This structure makes it simpler to change aspects of the resources, as for an example I'll be doing the same exercise for `blue-green` but with different customizations.
+
+`Kustomize` is template free, not like `helm`, and it's simpler when dealing with resources you don't need to distribute.
+
+You can use both though, like patch a 3rd party `helm chart` that lacks something you actually need.
+
+But I didn't want any `full release` control of the resources in this case, just `argo-rollouts` controlling the rollouts is enough for this exercise.
+
+I might return anyway in the future to make a `helm` chart, not for distribution but ony for the sacke of testing it together with `kustomize`.
+
+More references: 
+
+* <a href="https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/helmcharts/" target="_blank">kustomize enable-helm</a>
+* 
+
 
 # Canary
 
-A decrease in le="0.5" can just mean fewer requests overall, so the absolute bucket rate isn't a reliable signal. What matters is the proportion of requests under a threshold. If le="0.5" drops while le="+Inf" doesn't, there are more executions above 0.5s.
+For the whole exercise to work the `oha-loadtester` will constantly generate traffic with little to not gaps.
 
-So compare the fraction of fast requests, now vs before:
+My plan of deployment is the following:
+
+1. First rollout with stable version `v1.0.0`.
+2. Let's do a new rollout setting the image to the new app `v2.0.0`.
+    1. As it's a canary deployment we can see new pods for the new rollout brought up after each step of the rollout.
+    2. Each step brings more pods up, and after step 2 it's when our `AnalysisTemplate` is triggered, but the condition is that more than just a single check of the metrics is done, so multiple failures have to show that the new deployment is actually slower than the previous one.
+    3. Rollout here should be rolled back, as our `AnalysisTemplate` will fail, as our `SLO` will not hit the target, so new version is slower than the stable one.
+3. Now it comes the fix with new tag `v2.0.1`, so a new image set for the app.
+    1. Now the `SLO` will be better or equal to the version `v1.0.0`, so rollout should progress. 
+
+**Ps: I'm not taking into consideration if the app had any changes in terms of features, that forces it to be changed, like a change on how the calculation does, and anyway in cases like this you can force `argo-rollouts` to anyway proceed with the rollout even though the analysis have failed.**
+
+## AnalysisTamplate
+
+In order for the rollouts to progress it has to pass the `AnalysisTemplate` called `latency`.
+
+The analysis template is based on the `prometheus` metric `app_request_duration_seconds_bucket`:
 
 ```promql
-(
-  sum(rate(app_request_duration_seconds_bucket{le="0.5"}[5m]))
-  / sum(rate(app_request_duration_seconds_bucket{le="+Inf"}[5m]))
-)
--
-(
-  sum(rate(app_request_duration_seconds_bucket{le="0.5"}[5m] offset 1h))
-  / sum(rate(app_request_duration_seconds_bucket{le="+Inf"}[5m] offset 1h))
-)
-```
-
-A negative result means a smaller share of requests are finishing under 0.5s than before, which is a latency regression. Pick the le that matches your SLO or the latency you care about for that endpoint.
-
-Quantiles work too, and they're easier to read as "p95 went from X to Y":
-
-```promql
-histogram_quantile(0.95, sum by (le) (rate(app_request_duration_seconds_bucket[5m])))
+sum(rate(app_request_duration_seconds_bucket{le="0.5",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}",rollouts_pod_template_hash="{{args.canary-hash}}"}[5m]))
 /
-histogram_quantile(0.95, sum by (le) (rate(app_request_duration_seconds_bucket[5m] offset 1h)))
+sum(rate(app_request_duration_seconds_bucket{le="+Inf",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}",rollouts_pod_template_hash="{{args.canary-hash}}"}[5m]))
 ```
 
-A value above 1 means p95 got slower. Add handler (or whatever your endpoint label is) to the by clause to get this per endpoint.
+So here's what the query results:
+
+* Analysis the min `SLO` for the new `canary-hash` rollout metrics for the `bucket` `le="0.5"`:
+    * All requests should be below 0.5s or lower.
+    * A decrease in `le="0.5"` can just mean fewer requests overall, so the absolute bucket rate isn't a reliable signal. What matters is the proportion of requests under a threshold. If `le="0.5"` drops while `le="+Inf"` doesn't, there are more executions above `0.5`.
+
+Here's the main definition of the `AnalysisTemplate`:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: latency
+spec:
+  args:
+  - name: app-name
+  - name: predict-endpoint
+  - name: canary-hash
+  metrics:
+  - name: app_request_duration_seconds_bucket
+    interval: 1m
+    # NOTE: prometheus queries return results in the form of a vector.
+    # So it is common to access the index 0 of the returned array to obtain the value
+    successCondition: len(result) > 0 && result[0] >= 0.95
+    failureLimit: 8
+    provider:
+      prometheus:
+        address: http://prometheus-server.prometheus.svc.cluster.local
+        query: |
+          sum(rate(app_request_duration_seconds_bucket{le="0.5",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}",rollouts_pod_template_hash="{{args.canary-hash}}"}[5m]))
+          /
+          sum(rate(app_request_duration_seconds_bucket{le="+Inf",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}",rollouts_pod_template_hash="{{args.canary-hash}}"}[5m]))
+```
+
+By he definiion we see:
+* The query and the whole defintion we described above for how he analysis is done and what's analyised.
+* The `failureLimit` is set to 8, so failures < 9, rollouts won't progress.
+
+**The same analysis does not run on the first rollout deployment, but you can run it as well by creating an `AnalysisRun` instead with the same queries as above and run it manually.**
+
+# Blue-Green
+
+`TODO`

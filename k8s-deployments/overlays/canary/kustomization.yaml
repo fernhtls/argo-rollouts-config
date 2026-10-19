@@ -1,17 +1,19 @@
 namespace: app-argo-rollouts
 namePrefix: canary-
 images:
-  - name: app-argo-rollouts
-    newName: localhost/app-argo-rollouts
-    newTag: v1.0.0
+- name: app-argo-rollouts
+  newName: localhost/app-argo-rollouts
+  newTag: v1.0.0
 resources:
 - ../../app-argo-rollouts.yaml
 patches:
-  - path: strategy-patch.yaml
-    target:
-      kind: Rollout
-      name: argo-rollouts-deployment
-  - path: cronjob-patch.yaml
-    target:
-      kind: CronJob
-      name: oha-loadtest
+- path: strategy-patch.yaml
+  target:
+    kind: Rollout
+    name: argo-rollouts-deployment
+- path: cronjob-patch.yaml
+  target:
+    kind: CronJob
+    name: oha-loadtest
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization

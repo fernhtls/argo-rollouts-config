@@ -61,3 +61,31 @@ Status code distribution:
 Error distribution:
   [2] aborted due to deadline
 ```
+
+# oha docker and cronjob
+
+To actually push a load test, you can just port-forward requests to your k8s service, as behind the scenes it only picks up one of the services to route your requests.
+
+I've decided to create a docker image, and a cronjob to trigger the requests and have a constant flow of requests to my tests.
+
+So the [docker file](./Dockerfile) here is mainly just putting `oha` on a container image, that will be used on my [cronjob](../k8s-deployments/app-argo-rollouts.yaml#95).
+
+For each use case I'll be patching the cronjob wth certain arguments, so you can see on my [`kustomization.yaml`](../k8s-deployments/overlays/canary/kustomization.yaml#14) file that I am patching how to do the calls and to which service.
+
+Building the image:
+
+```bash
+podman build . -t oha-loadtest:latest
+```
+
+Or build directly on your remote podman for example:
+
+```bash
+podman --connection <remote-host> build . -t oha-loadtest:latest
+```
+
+**Ps: Services are only doing round-robin calls to the underline pods / endpoints, so there's no rule by default that looks if a pod is overloaded or not.**
+
+## References:
+
+* <a href="https://v1-32.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_port-forward/#synopsis" target="_blank">kubectl port-forward</a>

@@ -13,29 +13,40 @@ spec:
   - name: app-name
   - name: predict-endpoint
   - name: canary-hash
-  - name: stable-hash
   metrics:
   - name: app_request_duration_seconds_bucket
     interval: 1m
     # NOTE: prometheus queries return results in the form of a vector.
     # So it is common to access the index 0 of the returned array to obtain the value
     successCondition: len(result) > 0 && result[0] >= 0.95
-    failureLimit: 8
+    failureLimit: 5 
     provider:
       prometheus:
         address: http://prometheus-server.prometheus.svc.cluster.local
         query: |
-          (
-            sum(rate(app_request_duration_seconds_bucket{le="0.5",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}",rollouts_pod_template_hash="{{args.canary-hash}}"}[5m]))
-            /
-            sum(rate(app_request_duration_seconds_bucket{le="+Inf",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}",rollouts_pod_template_hash="{{args.canary-hash}}"}[5m]))
-          )
-          -
-          (
-            sum(rate(app_request_duration_seconds_bucket{le="0.5",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}",rollouts_pod_template_hash="{{args.stable-hash}}"}[5m]))
-            /
-            sum(rate(app_request_duration_seconds_bucket{le="+Inf",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}",rollouts_pod_template_hash="{{args.stable-hash}}"}[5m]))
-          )
+          sum(rate(app_request_duration_seconds_bucket{le="0.5",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}",rollouts_pod_template_hash="{{args.canary-hash}}"}[5m]))
+          /
+          sum(rate(app_request_duration_seconds_bucket{le="+Inf",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}",rollouts_pod_template_hash="{{args.canary-hash}}"}[5m]))
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: errors-new-rollout
+spec:
+  args:
+  - name: app-name
+  - name: predict-endpoint
+  - name: canary-hash
+  metrics:
+  - name: app_http_requests_total
+    interval: 1m
+    successCondition: len(result) == 0 || result[0] == 0
+    failureLimit: 5 
+    provider:
+      prometheus:
+        address: http://prometheus-server.prometheus.svc.cluster.local
+        query: |
+          sum(rate(app_http_requests_total{status_code=~"5.*",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}",rollouts_pod_template_hash="{{args.canary-hash}}"}[5m])) or vector(0)
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Rollout 
@@ -77,6 +88,56 @@ spec:
             cpu: "2.0"
             memory: "3G" 
   strategy: {}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisRun
+metadata:
+  name: run-latency
+spec:
+  args:
+  - name: app-name
+    value: argo-rollouts-deployment
+  - name: predict-endpoint
+    value: predict 
+  metrics:
+  - name: app_request_duration_seconds_bucket
+    interval: 1m
+    # NOTE: prometheus queries return results in the form of a vector.
+    # So it is common to access the index 0 of the returned array to obtain the value
+    successCondition: len(result) > 0 && result[0] >= 0.95
+    count: 10 # will stop at the 10th execution
+    failureLimit: 8
+    initialDelay: "1m"
+    provider:
+      prometheus:
+        address: http://prometheus-server.prometheus.svc.cluster.local
+        query: |
+          sum(rate(app_request_duration_seconds_bucket{le="0.5",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}"}[5m]))
+          /
+          sum(rate(app_request_duration_seconds_bucket{le="+Inf",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}"}[5m]))
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisRun
+metadata:
+  name: run-errors-new-rollout
+spec:
+  args:
+  - name: app-name
+    value: argo-rollouts-deployment
+  - name: predict-endpoint
+    value: predict 
+  metrics:
+  - name: app_http_requests_total
+    interval: 1m
+    successCondition: len(result) == 0 || result[0] == 0
+    count: 7
+    failureLimit: 5 
+    initialDelay: "1m"
+    provider:
+      prometheus:
+        address: http://prometheus-server.prometheus.svc.cluster.local
+        query: |
+          sum(rate(app_http_requests_total{status_code=~"5.*",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}"}[5m])) or vector(0)
 ---
 apiVersion: v1
 kind: Service
