@@ -362,7 +362,7 @@ spec:
     # NOTE: prometheus queries return results in the form of a vector.
     # So it is common to access the index 0 of the returned array to obtain the value
     successCondition: len(result) > 0 && result[0] >= 0.95
-    failureLimit: 8
+    failureLimit: 5 
     provider:
       prometheus:
         address: http://prometheus-server.prometheus.svc.cluster.local
@@ -377,6 +377,35 @@ By he definiion we see:
 * The `failureLimit` is set to 8, so failures < 9, rollouts won't progress.
 
 **The same analysis does not run on the first rollout deployment, but you can run it as well by creating an `AnalysisRun` instead with the same queries as above and run it manually.**
+
+As an additonal test I've included an analysis template to check the counts of response status codes, so if we have `5**` response status codes, it means that there's some issue with the rollout, so don't progress.
+
+Here's the `AnalysisTemplate` defintion:
+
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: errors-new-rollout
+spec:
+  args:
+  - name: app-name
+  - name: predict-endpoint
+  - name: canary-hash
+  metrics:
+  - name: app_http_requests_total
+    interval: 1m
+    successCondition: len(result) == 0 || result[0] == 0
+    failureLimit: 5 
+    provider:
+      prometheus:
+        address: http://prometheus-server.prometheus.svc.cluster.local
+        query: |
+          sum(rate(app_http_requests_total{status_code=~"5.*",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}",rollouts_pod_template_hash="{{args.canary-hash}}"}[5m])) or vector(0)
+```
+
+This template will be probably used as well for the `Blue-Green` rollout strategy. 
 
 # Blue-Green
 
