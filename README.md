@@ -432,8 +432,6 @@ Let's check if our first revision is deployed on the dashboard:
 
 ![first revision 1](./pictures/first-revision-1.png)
 
-![first revision 2](./pictures/first-revision-2.png)
-
 There are two initial `AnalysisRun` resources running at the first deployment. This is mainly to monitor now how the first deployment is running, but they are not tied to our `Rollout` resource though.
 
 They are measuring the same as the `AnalysisTemplate`, but when deploying a first revision you don't have an analysis running.
