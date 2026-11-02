@@ -126,10 +126,10 @@ Writing manifest to image destination
 ```
 
 ```bash
-minikube image load app-argo-rollouts-v100.tar
+minikube image load app-argo-rollouts.tar
 ```
 
-**With the 3 images now at hand we can now proceed with the rollouts, as mainly the rollouts will be pushing new hashes due to the image change.**
+**With the 3 images now we can now proceed with the rollouts, as mainly the rollouts will be pushing new hashes due to the image change.**
 
 # Installation
 
@@ -258,10 +258,10 @@ kustomize build --load-restrictor LoadRestrictionsNone ./overlays/canary | kubec
 ```
 
 ```bash
-Summary: 5 resources found parsing stdin - Valid: 5, Invalid: 0, Errors: 0, Skipped: 0
+Summary: 8 resources found parsing stdin - Valid: 8, Invalid: 0, Errors: 0, Skipped: 0
 ```
 
-Appllying changes with kustomize (change the image tag: 
+Appllying changes with kustomize (change the image tag): 
 
 ```bash
 cd k8s-deployments/ 
@@ -310,8 +310,6 @@ I might return anyway in the future to make a `helm` chart, not for distribution
 More references: 
 
 * <a href="https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/helmcharts/" target="_blank">kustomize enable-helm</a>
-* 
-
 
 # Canary
 
@@ -375,7 +373,7 @@ spec:
           sum(rate(app_request_duration_seconds_bucket{le="+Inf",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}",rollouts_pod_template_hash="{{args.canary-hash}}"}[5m]))
 ```
 
-By he definiion we see:
+By he definition we see:
 * The query and the whole defintion we described above for how he analysis is done and what's analyised.
 * The `failureLimit` is set to 8, so failures < 9, rollouts won't progress.
 
@@ -408,7 +406,629 @@ spec:
           sum(rate(app_http_requests_total{status_code=~"5.*",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}",rollouts_pod_template_hash="{{args.canary-hash}}"}[5m])) or vector(0)
 ```
 
-This template will be probably used as well for the `Blue-Green` rollout strategy. 
+This template will be used as well for the `Blue-Green` rollout strategy. 
+
+## Canary Tests
+
+### First Revision
+
+So now let's apply the first deployment, still image the image tag `v1.0.0`.
+
+I've included as part of the first deployment an `AnalysisRun` to make sure that even on the first deployment we are not having requests above the `SLO` planned, so having most executiongs below `0.5s`.
+
+I'll be using the `ArgoRollouts` dashboard to monitor the whole deployment, and let's wait at least until the first `AnalysisRun` finishes to start pushing new versions.
+
+So for the first deployment we won't change the image at the [kustomization.yaml](./k8s-deployments/overlays/canary/kustimization.yaml) file.
+
+**Ps: Good practice on each step is to run our validation above with `kubeconform` at each step, but you can skip now as the only change is the image tag.**
+
+```bash
+cd k8s-deployments
+kustomize build --load-restrictor LoadRestrictionsNone overlays/canary | k apply -f -
+```
+Let's start the `ArgoRollouts` dashboard:
+
+```bash
+k argo rollouts dashboard
+```
+And then we get the output of the URL to access it:
+
+```
+INFO[0000] Argo Rollouts Dashboard is now available at http://localhost:3100/rollouts
+```
+
+Let's check if our first revision is deployed on the dashboard:
+
+![first revision 1](./pictures/first-revision-1.png)
+
+![first revision 2](./pictures/first-revision-2.png)
+
+There are two initial `AnalysisRun` resources running at the first deployment. This is mainly to monitor now how the first deployment is running, but they are not tied to our `Rollout` resource though.
+
+They are measuring the same as the `AnalysisTemplate`, but when deploying a first revision you don't have an analysis running.
+
+We could have the command line running the an `AnalysisRun` from a `AnalysisTemplate`, and I'll do the command as well to check the new rollout.
+
+Listing the `AnalysisRun` and the status:
+
+```bash
+k get analysisrun
+NAME                            STATUS       AGE
+canary-run-errors-new-rollout   Successful   12m
+canary-run-latency              Successful   12m
+```
+
+We can see that both were successful, but let's check all status from it.
+
+Let's check the details with `describe`:
+
+```bash
+k describe analysisrun canary-run-latency
+```
+
+You can check the full resource by yourself, so let me focus of the `Status`, as that's where we will see the results of the analysis:
+
+```bash
+Status:
+  Completed At:  2026-11-02T09:53:43Z
+  Dry Run Summary:
+  Metric Results:
+    Consecutive Success:  9
+    Count:                10
+    Failed:               1
+    Measurements:
+      Finished At:  2026-11-02T09:44:43Z
+      Phase:        Failed
+      Started At:   2026-11-02T09:44:43Z
+      Value:        []
+      Finished At:  2026-11-02T09:45:43Z
+      Phase:        Successful
+      Started At:   2026-11-02T09:45:43Z
+      Value:        [1]
+      Finished At:  2026-11-02T09:46:43Z
+      Phase:        Successful
+      Started At:   2026-11-02T09:46:43Z
+      Value:        [1]
+      Finished At:  2026-11-02T09:47:43Z
+      Phase:        Successful
+      Started At:   2026-11-02T09:47:43Z
+      Value:        [1]
+      Finished At:  2026-11-02T09:48:43Z
+      Phase:        Successful
+      Started At:   2026-11-02T09:48:43Z
+      Value:        [1]
+      Finished At:  2026-11-02T09:49:43Z
+      Phase:        Successful
+      Started At:   2026-11-02T09:49:43Z
+      Value:        [1]
+      Finished At:  2026-11-02T09:50:43Z
+      Phase:        Successful
+      Started At:   2026-11-02T09:50:43Z
+      Value:        [1]
+      Finished At:  2026-11-02T09:51:43Z
+      Phase:        Successful
+      Started At:   2026-11-02T09:51:43Z
+      Value:        [1]
+      Finished At:  2026-11-02T09:52:43Z
+      Phase:        Successful
+      Started At:   2026-11-02T09:52:43Z
+      Value:        [1]
+      Finished At:  2026-11-02T09:53:43Z
+      Phase:        Successful
+      Started At:   2026-11-02T09:53:43Z
+      Value:        [1]
+    Metadata:
+      Resolved Prometheus Query:  sum(rate(app_request_duration_seconds_bucket{le="0.5",app="argo-rollouts-deployment",endpoint="predict"}[5m]))
+/
+sum(rate(app_request_duration_seconds_bucket{le="+Inf",app="argo-rollouts-deployment",endpoint="predict"}[5m]))
+
+    Name:        app_request_duration_seconds_bucket
+    Phase:       Successful
+    Successful:  9
+  Phase:         Successful
+```
+
+And we can see that our `SLO` is guarantee on the `AnalysisRun`, even though we had an initial failure, but most probably it was mainly due to the lack of metrics in prometheus.
+
+Let's check the `canary-run-errors-new-rollout`:
+
+```bash
+Status:
+  Completed At:  2026-11-02T09:50:42Z
+  Dry Run Summary:
+  Metric Results:
+    Consecutive Success:  7
+    Count:                7
+    Measurements:
+      Finished At:  2026-11-02T09:44:42Z
+      Phase:        Successful
+      Started At:   2026-11-02T09:44:42Z
+      Value:        [0]
+      Finished At:  2026-11-02T09:45:42Z
+      Phase:        Successful
+      Started At:   2026-11-02T09:45:42Z
+      Value:        [0]
+      Finished At:  2026-11-02T09:46:42Z
+      Phase:        Successful
+      Started At:   2026-11-02T09:46:42Z
+      Value:        [0]
+      Finished At:  2026-11-02T09:47:42Z
+      Phase:        Successful
+      Started At:   2026-11-02T09:47:42Z
+      Value:        [0]
+      Finished At:  2026-11-02T09:48:42Z
+      Phase:        Successful
+      Started At:   2026-11-02T09:48:42Z
+      Value:        [0]
+      Finished At:  2026-11-02T09:49:42Z
+      Phase:        Successful
+      Started At:   2026-11-02T09:49:42Z
+      Value:        [0]
+      Finished At:  2026-11-02T09:50:42Z
+      Phase:        Successful
+      Started At:   2026-11-02T09:50:42Z
+      Value:        [0]
+    Metadata:
+      Resolved Prometheus Query:  sum(rate(app_http_requests_total{status_code=~"5.*",app="argo-rollouts-deployment",endpoint="predict"}[5m])) or vector(0)
+```
+
+We can see that we didn't have any errors as well on deployment the first rollout revision.
+
+**Ps: The `AnalysisRun` here does not block the creation of the `Rollout`, like it blocks the progress of the version changes we will be showing later, but it could be used as a mechanism to monitor this first revision creation and check if it's healthy.**
+
+
+Let's run one of the `AnalysisTemplate` as an `AnalysisRun` to check the command and check it's output:
+
+```bash
+k argo rollouts create analysisrun --from canary-latency \
+    -a app-name=argo-rollouts-deployment \
+    -a predict-endpoint=predict \
+    -a canary-hash=796658bbd7
+analysisrun.argoproj.io/canary-latency-bv8x6 created
+```
+As you can see in the command we can pass all the arguments needed to run it on the command line.
+
+We can use both options in terms of CI/CD, create a more generic run, or just run a command and pass all arguments needed.
+
+The values passed to create the `AnalysisRun` are the same passed when [patching](./k8s-deployments/overlays/canary/strategy-patch.yaml) the strategy for the rollout.
+
+The `canary-hash` value is the new hash generated for this first rollout revision, and you can check it on the `argo-rollouts` dashboard, or checking the rollout on the command line:
+
+```bash
+k argo rollouts list rollout
+```
+
+```bash
+NAME                             STRATEGY   STATUS        STEP  SET-WEIGHT  READY  DESIRED  UP-TO-DATE  AVAILABLE
+canary-argo-rollouts-deployment  Canary     Healthy       8/8   100         4/4    4        4           4
+```
+
+```bash
+k argo rollouts get rollout canary-argo-rollouts-deployment
+```
+
+```bash
+Name:            canary-argo-rollouts-deployment
+Namespace:       app-argo-rollouts
+Status:          ✔ Healthy
+Strategy:        Canary
+  Step:          8/8
+  SetWeight:     100
+  ActualWeight:  100
+Images:          localhost/app-argo-rollouts:v1.0.0 (stable)
+Replicas:
+  Desired:       4
+  Current:       4
+  Updated:       4
+  Ready:         4
+  Available:     4
+
+NAME                                                         KIND        STATUS     AGE  INFO
+⟳ canary-argo-rollouts-deployment                            Rollout     ✔ Healthy  39m
+└──# revision:1
+   └──⧉ canary-argo-rollouts-deployment-796658bbd7           ReplicaSet  ✔ Healthy  39m  stable
+      ├──□ canary-argo-rollouts-deployment-796658bbd7-9bwrn  Pod         ✔ Running  39m  ready:1/1
+      ├──□ canary-argo-rollouts-deployment-796658bbd7-d7lwr  Pod         ✔ Running  39m  ready:1/1
+      ├──□ canary-argo-rollouts-deployment-796658bbd7-kwdkc  Pod         ✔ Running  39m  ready:1/1
+      └──□ canary-argo-rollouts-deployment-796658bbd7-w64pw  Pod         ✔ Running  39m  ready:1/1
+```
+
+So our hash is `796658bbd7`.
+
+Let's list and describe the new run and check the results.
+
+```bash
+k get analysisruns.argoproj.io
+NAME                            STATUS       AGE
+canary-latency-bv8x6            Running      8m13s
+canary-run-errors-new-rollout   Successful   36m
+canary-run-latency              Successful   36m
+```
+
+```bash
+Name:         canary-latency-bv8x6
+Namespace:    app-argo-rollouts
+Labels:       <none>
+Annotations:  <none>
+API Version:  argoproj.io/v1alpha1
+Kind:         AnalysisRun
+Metadata:
+  Creation Timestamp:  2026-11-02T10:12:07Z
+  Generate Name:       canary-latency-
+  Generation:          11
+  Resource Version:    2427302
+  UID:                 68bd10fb-23c5-4fa9-b611-26f74dcce73f
+Spec:
+  Args:
+    Name:   app-name
+    Value:  argo-rollouts-deployment
+    Name:   predict-endpoint
+    Value:  predict
+    Name:   canary-hash
+    Value:  796658bbd7
+  Metrics:
+    Failure Limit:  5
+    Interval:       1m
+    Name:           app_request_duration_seconds_bucket
+    Provider:
+      Prometheus:
+        Address:  http://prometheus-server.prometheus.svc.cluster.local
+        Query:    sum(rate(app_request_duration_seconds_bucket{le="0.5",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}",rollouts_pod_template_hash="{{args.canary-hash}}"}[5m]))
+/
+sum(rate(app_request_duration_seconds_bucket{le="+Inf",app="{{args.app-name}}",endpoint="{{args.predict-endpoint}}",rollouts_pod_template_hash="{{args.canary-hash}}"}[5m]))
+
+    Success Condition:  len(result) > 0 && result[0] >= 0.95
+Status:
+  Dry Run Summary:
+  Metric Results:
+    Consecutive Success:  10
+    Count:                10
+    Measurements:
+      Finished At:  2026-11-02T10:12:07Z
+      Phase:        Successful
+      Started At:   2026-11-02T10:12:07Z
+      Value:        [1]
+      Finished At:  2026-11-02T10:13:07Z
+      Phase:        Successful
+      Started At:   2026-11-02T10:13:07Z
+      Value:        [1]
+      Finished At:  2026-11-02T10:14:07Z
+      Phase:        Successful
+      Started At:   2026-11-02T10:14:07Z
+      Value:        [1]
+      Finished At:  2026-11-02T10:15:07Z
+      Phase:        Successful
+      Started At:   2026-11-02T10:15:07Z
+      Value:        [1]
+      Finished At:  2026-11-02T10:16:07Z
+      Phase:        Successful
+      Started At:   2026-11-02T10:16:07Z
+      Value:        [1]
+      Finished At:  2026-11-02T10:17:07Z
+      Phase:        Successful
+      Started At:   2026-11-02T10:17:07Z
+      Value:        [1]
+      Finished At:  2026-11-02T10:18:07Z
+      Phase:        Successful
+      Started At:   2026-11-02T10:18:07Z
+      Value:        [1]
+      Finished At:  2026-11-02T10:19:07Z
+      Phase:        Successful
+      Started At:   2026-11-02T10:19:07Z
+      Value:        [1]
+      Finished At:  2026-11-02T10:20:07Z
+      Phase:        Successful
+      Started At:   2026-11-02T10:20:07Z
+      Value:        [1]
+      Finished At:  2026-11-02T10:21:07Z
+      Phase:        Successful
+      Started At:   2026-11-02T10:21:07Z
+      Value:        [1]
+    Metadata:
+      Resolved Prometheus Query:  sum(rate(app_request_duration_seconds_bucket{le="0.5",app="argo-rollouts-deployment",endpoint="predict",rollouts_pod_template_hash="796658bbd7"}[5m]))
+/
+sum(rate(app_request_duration_seconds_bucket{le="+Inf",app="argo-rollouts-deployment",endpoint="predict",rollouts_pod_template_hash="796658bbd7"}[5m]))
+
+    Name:        app_request_duration_seconds_bucket
+    Phase:       Running
+    Successful:  10
+  Phase:         Running
+  Run Summary:
+    Count:     1
+  Started At:  2026-11-02T10:12:07Z
+Events:        <none>
+```
+
+As the run now is not tied to a rollout process, and it does not have count, we have to stop it manually:
+
+```bash
+k argo rollouts terminate analysisrun canary-latency-bv8x6
+```
+
+```bash
+➜  k8s-deployments git:(main) ✗ k argo rollouts terminate analysisrun canary-latency-bv8x6
+
+analysisRun 'canary-latency-bv8x6' terminated
+```
+
+```bash
+k get analysisruns.argoproj.io
+NAME                            STATUS       AGE
+canary-latency-bv8x6            Successful   16m
+canary-run-errors-new-rollout   Successful   44m
+canary-run-latency              Successful   44m
+```
+
+### Second revision
+
+Let's now progress with the versioning, so we have a new app version.
+
+So now the rollout will run both `AnalysisTemplate`, and mark if it's successful or not and then allowing the progress of the rollout or not.
+
+Just to recapitulate, for version `v2.0.0` I've included a `time.sleep` in the endpoint, so it will harm our `SLO` for the new version.
+
+There won't be any errors though, so no `5**` responses.
+
+Let's first patch the deployment with `kustomize` by editing our image and tag:
+
+```bash
+cd ./k8s-deployments/overlays/canary
+kustomize edit set image app-argo-rollouts=localhost/app-argo-rollouts:v2.0.0
+```
+
+**Ps: Go back to the directory `k8s-deployments` before running further commands. In order to run the `kustomize edit` command we have to unfortunately navigate to the `kustomization.yaml` file.**
+
+Let's check if it's all still valid for pushing the changes with `kustomize`:
+
+```bash
+kustomize build --load-restrictor LoadRestrictionsNone ./overlays/canary | kubeconform \
+  -schema-location default \
+  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+  -strict -summary
+Summary: 8 resources found parsing stdin - Valid: 8, Invalid: 0, Errors: 0, Skipped: 0
+```
+
+Let's run the new rollout now:
+
+```bash
+kustomize build --load-restrictor LoadRestrictionsNone overlays/canary | k apply -f -
+```
+
+Let's check it with the command line as well:
+
+```bash
+k argo rollouts get rollout canary-argo-rollouts-deployment
+Name:            canary-argo-rollouts-deployment
+Namespace:       app-argo-rollouts
+Status:          ॥ Paused
+Message:         CanaryPauseStep
+Strategy:        Canary
+  Step:          1/8
+  SetWeight:     20
+  ActualWeight:  20
+Images:          localhost/app-argo-rollouts:v1.0.0 (stable)
+                 localhost/app-argo-rollouts:v2.0.0 (canary)
+Replicas:
+  Desired:       4
+  Current:       5
+  Updated:       1
+  Ready:         5
+  Available:     5
+
+NAME                                                         KIND        STATUS     AGE    INFO
+⟳ canary-argo-rollouts-deployment                            Rollout     ॥ Paused   68m
+├──# revision:2
+│  └──⧉ canary-argo-rollouts-deployment-7fbf7c56d4           ReplicaSet  ✔ Healthy  8m16s  canary
+│     └──□ canary-argo-rollouts-deployment-7fbf7c56d4-7qfvq  Pod         ✔ Running  8m16s  ready:1/1
+└──# revision:1
+   └──⧉ canary-argo-rollouts-deployment-796658bbd7           ReplicaSet  ✔ Healthy  68m    stable
+      ├──□ canary-argo-rollouts-deployment-796658bbd7-9bwrn  Pod         ✔ Running  68m    ready:1/1
+      ├──□ canary-argo-rollouts-deployment-796658bbd7-d7lwr  Pod         ✔ Running  68m    ready:1/1
+      ├──□ canary-argo-rollouts-deployment-796658bbd7-kwdkc  Pod         ✔ Running  68m    ready:1/1
+      └──□ canary-argo-rollouts-deployment-796658bbd7-w64pw  Pod         ✔ Running  68m    ready:1/1
+```
+
+We will see the steps on the rollout and it's pauses, and we will be able to see the `AnalysisTemplate` being triggered at the step `2`.
+
+![second revision 1](./pictures/second-revision-1.png)
+
+As you can check on the strategy patch for canary, we are progressing the number of instances on the new revision at each step.
+
+The pauses are important between the steps, as with this we have guarantee, and enough metrics collected, to run our `AnalysisTemplate` checks.
+
+On reaching the step 2 now we see the `AnalysisTemplate` running:
+
+![second revision start analysis](./pictures/second-revision-start-analysis.png)
+
+And we can check the detailed information for the analysis as well:
+
+![second revision analysis detail 1](./pictures/second-revision-analysis-detail-1.png)
+
+We've set intervals on both analysis to collect the metrics and do the analysis, so let's see how it will go with the new revision after all metrics are collected and if we the revision will be allowed to progress.
+
+After the analysis it seems that our revison won't progress:
+
+![second revision analysis done](./pictures/second-revision-analysis-done.png)
+
+Let's see the metrics points collected and check why it didn't progress.
+
+For the `http errors` we have the following:
+
+![second revision http errors](./pictures/second-revision-http-errors.png)
+
+We can see that we had to failures, what's expected.
+
+For the `SLO`, or latency analysis:
+
+![second revision slo 1](./pictures/second-revision-slo-1.png)
+
+![second revision slo 2](./pictures/second-revision-slo-2.png)
+
+As expected as well our analysis here failed, and the rollouts didn't progress with the new image version.
+
+Of course we could force it to progress if we think that even with the negative analysis it won't cause a big impact, but let's keep it with the old version for our exercise.
+
+**Ps: Recapituliting again, the failure here is because of the `time.Sleep` we added in the endpoint for version `v2.0.0`. 
+
+### Third Revision
+
+So now we will try to rollout a patch that fixed version `v2.0.0`, with version `v2.0.1`.
+
+Let's do the same process by editing the image again and deploying again our rollout:
+
+```bash
+can ./k8s-deployments/overlays/canary
+kustomize edit set image app-argo-rollouts=localhost/app-argo-rollouts:v2.0.1
+```
+
+Checking if it's all valid:
+
+```bash
+kustomize build --load-restrictor LoadRestrictionsNone ./overlays/canary | kubeconform \
+  -schema-location default \
+  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+  -strict -summary
+
+Summary: 8 resources found parsing stdin - Valid: 8, Invalid: 0, Errors: 0, Skipped: 0
+```
+
+And deploying the new rollout:
+
+```bash
+kustomize build --load-restrictor LoadRestrictionsNone overlays/canary | k apply -f -
+```
+
+```bash
+k argo rollouts get rollout canary-argo-rollouts-deployment
+Name:            canary-argo-rollouts-deployment
+Namespace:       app-argo-rollouts
+Status:          ॥ Paused
+Message:         CanaryPauseStep
+Strategy:        Canary
+  Step:          1/8
+  SetWeight:     20
+  ActualWeight:  20
+Images:          localhost/app-argo-rollouts:v1.0.0 (stable)
+                 localhost/app-argo-rollouts:v2.0.1 (canary)
+Replicas:
+  Desired:       4
+  Current:       5
+  Updated:       1
+  Ready:         5
+  Available:     5
+
+NAME                                                         KIND         STATUS        AGE    INFO
+⟳ canary-argo-rollouts-deployment                            Rollout      ॥ Paused      87m
+├──# revision:3
+│  └──⧉ canary-argo-rollouts-deployment-6dfb49d477           ReplicaSet   ✔ Healthy     5m38s  canary
+│     └──□ canary-argo-rollouts-deployment-6dfb49d477-2vpg2  Pod          ✔ Running     5m38s  ready:1/1
+├──# revision:2
+│  ├──⧉ canary-argo-rollouts-deployment-7fbf7c56d4           ReplicaSet   • ScaledDown  27m
+│  └──α canary-argo-rollouts-deployment-7fbf7c56d4-2         AnalysisRun  ✖ Failed      22m    ✔ 6,✖ 6
+└──# revision:1
+   └──⧉ canary-argo-rollouts-deployment-796658bbd7           ReplicaSet   ✔ Healthy     87m    stable
+      ├──□ canary-argo-rollouts-deployment-796658bbd7-9bwrn  Pod          ✔ Running     87m    ready:1/1
+      ├──□ canary-argo-rollouts-deployment-796658bbd7-d7lwr  Pod          ✔ Running     87m    ready:1/1
+      ├──□ canary-argo-rollouts-deployment-796658bbd7-6dc9r  Pod          ✔ Running     17m    ready:1/1
+      └──□ canary-argo-rollouts-deployment-796658bbd7-fz75v  Pod          ✔ Running     17m    ready:1/1
+```
+
+![third revision 1](./pictures/third-revision-1.png)
+
+![third revision 2](./pictures/third-revision-2.png)
+
+We have to now wait for the analysis to start on step 2, and see the results.
+
+And it's now starting the analysis, and it looks promising, let's see if it passes and if it becomes the latest version.
+
+![third revision analysis start](./pictures/third-revision-analysis-start.png)
+
+![third revision analysis start detail](./pictures/third-revision-analysis-start-detail.png)
+
+After the analysis we see now that our new rollout progressed, so we have our new image version deployed as the latest revision.
+
+![third revision complete 1](./pictures/third-revision-complete-1.png)
+
+```bash
+k argo rollouts get rollout canary-argo-rollouts-deployment
+Name:            canary-argo-rollouts-deployment
+Namespace:       app-argo-rollouts
+Status:          ॥ Paused
+Message:         CanaryPauseStep
+Strategy:        Canary
+  Step:          7/8
+  SetWeight:     90
+  ActualWeight:  80
+Images:          localhost/app-argo-rollouts:v1.0.0 (stable)
+                 localhost/app-argo-rollouts:v2.0.1 (canary)
+Replicas:
+  Desired:       4
+  Current:       5
+  Updated:       4
+  Ready:         5
+  Available:     5
+
+NAME                                                         KIND         STATUS        AGE   INFO
+⟳ canary-argo-rollouts-deployment                            Rollout      ॥ Paused      107m
+├──# revision:3
+│  ├──⧉ canary-argo-rollouts-deployment-6dfb49d477           ReplicaSet   ✔ Healthy     25m   canary
+│  │  ├──□ canary-argo-rollouts-deployment-6dfb49d477-2vpg2  Pod          ✔ Running     25m   ready:1/1
+│  │  ├──□ canary-argo-rollouts-deployment-6dfb49d477-gjcp6  Pod          ✔ Running     20m   ready:1/1
+│  │  ├──□ canary-argo-rollouts-deployment-6dfb49d477-87j2k  Pod          ✔ Running     12m   ready:1/1
+│  │  └──□ canary-argo-rollouts-deployment-6dfb49d477-qw2hv  Pod          ✔ Running     7m    ready:1/1
+│  └──α canary-argo-rollouts-deployment-6dfb49d477-3         AnalysisRun  ◌ Running     20m   ✔ 30
+├──# revision:2
+│  ├──⧉ canary-argo-rollouts-deployment-7fbf7c56d4           ReplicaSet   • ScaledDown  46m
+│  └──α canary-argo-rollouts-deployment-7fbf7c56d4-2         AnalysisRun  ✖ Failed      41m   ✔ 6,✖ 6
+└──# revision:1
+   └──⧉ canary-argo-rollouts-deployment-796658bbd7           ReplicaSet   ✔ Healthy     107m  stable
+      └──□ canary-argo-rollouts-deployment-796658bbd7-d7lwr  Pod          ✔ Running     107m  ready:1/1
+```
+And finally revision 3 is now the stable one, ot latest.
+
+![third revision complete 2](./pictures/third-revision-complete-2.png)
+
+```bash
+k argo rollouts get rollout canary-argo-rollouts-deployment
+Name:            canary-argo-rollouts-deployment
+Namespace:       app-argo-rollouts
+Status:          ✔ Healthy
+Strategy:        Canary
+  Step:          8/8
+  SetWeight:     100
+  ActualWeight:  100
+Images:          localhost/app-argo-rollouts:v2.0.1 (stable)
+Replicas:
+  Desired:       4
+  Current:       4
+  Updated:       4
+  Ready:         4
+  Available:     4
+
+NAME                                                         KIND         STATUS        AGE   INFO
+⟳ canary-argo-rollouts-deployment                            Rollout      ✔ Healthy     112m
+├──# revision:3
+│  ├──⧉ canary-argo-rollouts-deployment-6dfb49d477           ReplicaSet   ✔ Healthy     29m   stable
+│  │  ├──□ canary-argo-rollouts-deployment-6dfb49d477-2vpg2  Pod          ✔ Running     29m   ready:1/1
+│  │  ├──□ canary-argo-rollouts-deployment-6dfb49d477-gjcp6  Pod          ✔ Running     24m   ready:1/1
+│  │  ├──□ canary-argo-rollouts-deployment-6dfb49d477-87j2k  Pod          ✔ Running     16m   ready:1/1
+│  │  └──□ canary-argo-rollouts-deployment-6dfb49d477-qw2hv  Pod          ✔ Running     11m   ready:1/1
+│  └──α canary-argo-rollouts-deployment-6dfb49d477-3         AnalysisRun  ✔ Successful  24m   ✔ 38
+├──# revision:2
+│  ├──⧉ canary-argo-rollouts-deployment-7fbf7c56d4           ReplicaSet   • ScaledDown  51m
+│  └──α canary-argo-rollouts-deployment-7fbf7c56d4-2         AnalysisRun  ✖ Failed      46m   ✔ 6,✖ 6
+└──# revision:1
+   └──⧉ canary-argo-rollouts-deployment-796658bbd7           ReplicaSet   • ScaledDown  112m
+```
+
+### Cleaning up the rollout and deployments
+
+As explained before, we can still use `kustomize` and `kubectl` to do the clean up:
+
+```bash
+cd k8s-deployments/
+kustomize build --load-restrictor LoadRestrictionsNone overlays/canary | k delete --force=true -f -
+```
 
 # Blue-Green
 
