@@ -1,6 +1,6 @@
 # Argo Rollouts
 
-`Argo-Rollouts` is a controller from `ArgoCD` that provides ways to performa analysis on deployments, and progress or rollback those based on metrics and statistics.
+`Argo-Rollouts` is a controller from `ArgoCD` that provides a way to perform analysis on deployments based on metrics, or any custom inputs, and decide based on the results to progress with the new version. 
 
 The problems `Argo-Rollouts` solves:
 
@@ -18,9 +18,11 @@ This repo is to explore two rollout deployment techniquies: `Blue-Green` and `Ca
 The repo will contain simple setups for both scenarios.
 
 ```mermaid
-graph TB 
+graph LR 
     subgraph k8s 
+    direction LR
         subgraph metrics
+        directon LR
             prometheus
         end
         subgraph rollout_deployments["Rollouts/Deployments"]
@@ -36,6 +38,7 @@ graph TB
            controller <--> analysis
         end
         subgraph loadtester["oha-loadtester"]
+        direction LR
             cronjob
         end
     end
