@@ -22,7 +22,7 @@ graph LR
     subgraph k8s 
     direction LR
         subgraph metrics
-        directon LR
+        direction LR
             prometheus
         end
         subgraph rollout_deployments["Rollouts/Deployments"]
