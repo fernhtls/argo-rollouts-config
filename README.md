@@ -1,6 +1,6 @@
 # Argo Rollouts
 
-`Argo-Rollouts` is a controller from `ArgoCD` that provides a way to perform analysis on deployments based on metrics, or any custom inputs, and decide based on the results to progress with the new version. 
+`Argo-Rollouts` is a controller from `ArgoCD` that provides a way to perform analysis on deployments based on metrics, or any custom inputs, and it decides based on the results to progress with the new version. 
 
 The problems `Argo-Rollouts` solves:
 
@@ -13,9 +13,11 @@ For more info we check the [`Argo-Rollouts page`](https://argo-rollouts.readthed
 
 # Setup
 
-This repo is to explore two rollout deployment techniquies: `Blue-Green` and `Canary`.
+This repo is explores two rollout deployment strategies: `Blue-Green` and `Canary`.
 
-The repo will contain simple setups for both scenarios.
+**Ps: `Blue-Green` will be coming in the near future.**
+
+The repo will contain a simple setup for both scenarios.
 
 ```mermaid
 graph LR 
@@ -57,7 +59,7 @@ Components:
 
 * `Argo-Rollouts`: has different components to monitor `Rollouts`, and make it's progression using `Canary`, `Blue-Green` strategies.
     * `Controller`: main component on `argo-rollouts`, monitoring all events and reacts when a `Rollout` resource is changed.
-    * `Analysis`: we will be creating `CRDs` like `AnalysisTemplate` and `AnalysisRun`, it does the connection with the `Rollout` resource and the metrics provider, in our case prometheus. 
+    * `Analysis`: we will be creating `CRDs` like `AnalysisTemplate` and `AnalysisRun`, it does the connection with the `Rollout` resource and the metrics provider, in our case `prometheus`. 
 * `Rollout/Deployments`: It's a `CRD` from `argo-rollouts`, very similar to a `Deployment`, with some additional keys we will need to configure as well to work. As explained above the main link for the controller to continue monitoring `rollouts` is the `AnalysisTemplate` or `AnalysisRun` `CRDs`.
     * `App v1`: first version of the `Rollout`.
     * `App v2`: second version of the `Rollout`.
@@ -77,7 +79,7 @@ I am using a remote podman and minikube host, so I am able to push the build to 
 podman --connection <remote-host> build . -t app-argo-rollouts:v1.0.0
 ```
 
-For the version `v2.0.0` we will be randomly wait / pause for a few seconds on requests:
+For the version `v2.0.0` we will be randomly waiting / pausing for a few seconds on requests:
 
 1. Ucomment [line 16](./app/main.go#16), it's the import for the `time` go package.
 2. And uncomment [line 120](./app/main.go#120), to add the `time.Sleep` call.
@@ -88,9 +90,9 @@ Now build a second version of the image for our new deployment:
 podman build . -t app-argo-rollout:v2.0.0
 ```
 
-For version `v2.0.1`, our fix to the version above we will remove the wait, and plus remove the calculation we have on generating the response, just using a constant instead.
+For version `v2.0.1`, our fix to the version above, we will remove the wait and the calculation we have on generating the response, just using a constant instead.
 
-This is mainly to just get a bit more time on returning the responses and to garaantee we will be on the same `SLO` or bettter than the previous deployment.
+This is mainly to just get a bit more time on returning the responses and to garaantee we will be on the required `SLO`.
 
 There are several ways to make the image available to your `minikube` instance (on podman running as another container and it can't reach the registry), but on my simple setup I would rather just share the image by `saving` a tar file and then `loading` into minikube:
 
@@ -135,15 +137,17 @@ minikube image load app-argo-rollouts.tar
 
 ## oha Loadtests
 
-I'll be using either [`oha`](https://rustutils.com/tools/oha/) or [`hey`](https://cli.wiki/hey---HTTP-Load-Testing-Tool-Guide#overview) as my loadtest tool.
+I'll be using either [`oha`](https://rustutils.com/tools/oha/) or [`hey`](https://cli.wiki/hey---HTTP-Load-Testing-Tool-Guide#overview) as my `load-test` tools.
 
-`oha` is `rust` and it gives you a execution summary and histograms, and it looks a bit nicer in terms of output and live tracking the executions.
+`oha` is developed in `rust` and it gives you a execution summary and histograms and live tracking of the executions.
 
 For go enjoyers there's `hey`, and it can be installed and embedded with any go application.
 
-`hey` brings a summary and histogram of execution as well, but with a simple interface.
+`hey` brings a summary and histogram of execution too, but with a simpler interface.
 
-I'm seeing `hey` as an alternative, but mainly I'll be using `oha`, as the installation, help is ready to use on macs, but might try `hey` on the server machine I'm deploying everything as well.
+I'm putting `hey` here as an alternative, but mainly I'll be using `oha`, as the binary installation is simpler to embed into a Docker container image.
+
+The binary on mac is simple to install too, and it contains a man / help page to check arguments.
 
 `oha` installation:
 
@@ -222,14 +226,14 @@ And here's the main page on prometheus, where you can test and check the queries
 
 ## Argo-Rollouts installation
 
-In order to install the controllers for `Argo-Rollouts`:
+`Argo-Rollouts` controller installation:
 
 ```bash
 kubectl create namespace argo-rollouts
 kubectl apply --server-side --force-conflicts -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
 ```
 
-**PS: It includes already the `CRDs`/**
+**PS: It includes already the `CRDs`.**
 
 ## Rollout / Deployment creation
 
@@ -238,12 +242,6 @@ I'll be using `kustomize` and `kubeconform` to apply and lint the resources.
 **Work with both will make it easier as well to template the same resources by just passing different `overlays` for both scenarios.**
 
 The requirements for this step is to have at least the [`Argo-Rollouts` installation done first](#argo-rollouts-installation) as this depends on the `Rollout` CRD installation.
-
-I'll be including examples on how to have a `Rollout` `CRD` referencing a deployment as well.
-
-The main thing is that the `Rollout` `CRD` is anyway creating a `Deployment` resource behind the scenes too.
-
-But to avoid any miss-configuration with the `strategy` for a `Deployment` and a `Rollout`, when using `Argo-Rollouts` it's better to use the later.
 
 Checking the kustomize output with `kubeconform`:
 
@@ -269,14 +267,7 @@ kustomize edit --load-restrictor LoadRestrictionsNone ./overlays/canary set imag
 kustomize build --load-restrictor LoadRestrictionsNone overlays/canary | kubectl apply -f -
 ```
 
-```bash
-namespace/app-argo-rollouts created
-service/canary-argo-rollouts-deployment-http created
-service/canary-argo-rollouts-deployment-metrics created
-rollout.argoproj.io/canary-argo-rollouts-deployment created
-```
-
-If you want to clean all resources there the same `kustomize build` can be used with delete now:
+If you want to clean all resources use the same `kustomize build` but with `delete` instead of `apply`:
 
 ```bash
 cd k8s-deployments/
@@ -285,7 +276,7 @@ kustomize build --load-restrictor LoadRestrictionsNone overlays/canary | kubectl
 
 # Kustomize setup
 
-I'm build the following as the structure for managing the deployments with `kustomize`:
+This is the directory structure for managing the deployments with `kustomize` on this repository:
 
 ```text
 k8s-deployments/
@@ -313,7 +304,7 @@ More references:
 
 # Canary
 
-For the whole exercise to work the `oha-loadtester` will constantly generate traffic with little to not gaps.
+For the whole exercise to work, the `oha-loadtester` will constantly generate traffic with little gaps, or not gaps at all.
 
 My plan of deployment is the following:
 
@@ -377,9 +368,9 @@ By he definition we see:
 * The query and the whole defintion we described above for how he analysis is done and what's analyised.
 * The `failureLimit` is set to 8, so failures < 9, rollouts won't progress.
 
-**The same analysis does not run on the first rollout deployment, but you can run it as well by creating an `AnalysisRun` instead with the same queries as above and run it manually.**
+**The same analysis does not run on the first rollout deployment, but you can run it as well by creating an `AnalysisRun` with the same definition, or create it from the analysis template.**
 
-As an additonal test I've included an analysis template to check the counts of response status codes, so if we have `5**` response status codes, it means that there's some issue with the rollout, so don't progress.
+As an additonal test I've included an analysis template to check response status codes, so if we have responses with `5**`status it means that there's some issue with the rollout, so don't progress.
 
 Here's the `AnalysisTemplate` defintion:
 
