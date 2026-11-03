@@ -9,7 +9,7 @@ The problems `Argo-Rollouts` solves:
     * With `Argo-Rollouts` we can make it based on metrics from `prometheus` and acccurate measure success rates, latency and others.
 * As explained above we have the hability to check external metrics that can give a more accurate view about the new version health. 
 
-For more info we check the [`Argo-Rollouts page`](https://argo-rollouts.readthedocs.io/en/stable/).
+For more info check the [`Argo-Rollouts page`](https://argo-rollouts.readthedocs.io/en/stable/).
 
 # Setup
 
